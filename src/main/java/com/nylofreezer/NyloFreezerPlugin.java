@@ -2,7 +2,6 @@ package com.nylofreezer;
 
 import com.google.inject.Inject;
 import java.awt.BasicStroke;
-import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
@@ -16,6 +15,7 @@ import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
+import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.NavigationButton;
 
 @PluginDescriptor(
@@ -57,7 +57,6 @@ public class NyloFreezerPlugin extends Plugin
         {
             clientToolbar.removeNavigation(navButton);
         }
-
         navButton = null;
     }
 
@@ -73,22 +72,19 @@ public class NyloFreezerPlugin extends Plugin
     @Subscribe
     public void onStatChanged(StatChanged event)
     {
-        if (event.getSkill() != Skill.MAGIC)
+        if (event.getSkill() == Skill.MAGIC)
         {
-            return;
+            // getLevel() is the real/static level. Do not use getBoostedLevel() here.
+            setPanelMagicLevel(event.getLevel());
         }
-
-        setPanelMagicLevel(event.getLevel());
     }
 
     private void syncMagicLevelFromClient()
     {
-        if (client.getGameState() != GameState.LOGGED_IN)
+        if (client.getGameState() == GameState.LOGGED_IN)
         {
-            return;
+            setPanelMagicLevel(client.getRealSkillLevel(Skill.MAGIC));
         }
-
-        setPanelMagicLevel(client.getRealSkillLevel(Skill.MAGIC));
     }
 
     private void setPanelMagicLevel(int level)
@@ -106,7 +102,7 @@ public class NyloFreezerPlugin extends Plugin
         {
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             g.setStroke(new BasicStroke(2.1f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-            g.setColor(new Color(202, 63, 74));
+            g.setColor(ColorScheme.BRAND_ORANGE);
 
             int cx = size / 2;
             int cy = size / 2;
@@ -119,9 +115,6 @@ public class NyloFreezerPlugin extends Plugin
                 int dy = (int) Math.round(Math.sin(angle) * r);
                 g.drawLine(cx - dx, cy - dy, cx + dx, cy + dy);
             }
-
-            g.setColor(new Color(235, 112, 122));
-            g.fillOval(cx - 2, cy - 2, 4, 4);
         }
         finally
         {

@@ -1,296 +1,243 @@
 package com.nylofreezer;
 
+import com.google.inject.Inject;
+import com.google.inject.Singleton;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.Font;
-import java.awt.GridBagConstraints;
-import java.awt.GridBagLayout;
 import java.awt.GridLayout;
-import java.awt.Insets;
-import java.awt.Toolkit;
-import java.awt.datatransfer.StringSelection;
-import java.util.ArrayList;
-import java.util.List;
-import javax.inject.Inject;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
-import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
-import javax.swing.JSpinner;
-import javax.swing.JTable;
-import javax.swing.SpinnerNumberModel;
+import javax.swing.JTextField;
 import javax.swing.SwingConstants;
+import javax.swing.border.Border;
+import javax.swing.border.CompoundBorder;
 import javax.swing.border.EmptyBorder;
-import javax.swing.table.DefaultTableCellRenderer;
-import javax.swing.table.DefaultTableModel;
-import javax.swing.table.JTableHeader;
+import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.PluginPanel;
+import net.runelite.client.ui.components.FlatTextField;
+import net.runelite.client.util.AsyncBufferedImage;
 
-final class NyloFreezerPanel extends PluginPanel
+@Singleton
+class NyloFreezerPanel extends PluginPanel
 {
-    private static final Color TOB_RED = new Color(202, 63, 74);
-    private static final Color TOB_RED_BRIGHT = new Color(235, 112, 122);
-    private static final Color TOB_RED_DARK = new Color(84, 28, 34);
-    private static final Color TEXT = new Color(220, 220, 220);
-    private static final Color MUTED = new Color(155, 155, 155);
+    private static final int VOID_MAGE_HELM_ID = 11663;
+    private static final int ICE_ANCIENT_SCEPTRE_ID = 28262;
 
     private static final Font SMALL_FONT = FontManager.getRunescapeSmallFont();
-    private static final Font SMALL_BOLD = SMALL_FONT.deriveFont(Font.BOLD);
-    private static final Font RESULT_FONT = SMALL_FONT.deriveFont(Font.BOLD, 16f);
+    private static final Font NORMAL_FONT = FontManager.getRunescapeFont();
 
-    private final JSpinner magicLevelSpinner = new JSpinner(new SpinnerNumberModel(99, 1, 99, 1));
-    private final JComboBox<FreezeCalculator.Boost> boostCombo = new JComboBox<>(FreezeCalculator.Boost.values());
-    private final JComboBox<FreezeCalculator.Prayer> prayerCombo = new JComboBox<>(FreezeCalculator.Prayer.values());
-    private final JCheckBox voidMage = new JCheckBox("Void mage");
-    private final JCheckBox iceSceptre = new JCheckBox("Ice sceptre");
-    private final JLabel resultValue = new JLabel("+0", SwingConstants.RIGHT);
-    private final DefaultTableModel tableModel;
-    private final JTable decayTable;
+    private final JTextField magicLevelField;
+    private final JComboBox<FreezeCalculator.Boost> boostCombo =
+        new JComboBox<>(FreezeCalculator.Boost.values());
+    private final JComboBox<FreezeCalculator.Prayer> prayerCombo =
+        new JComboBox<>(FreezeCalculator.Prayer.values());
+    private final ItemToggle voidMage;
+    private final ItemToggle iceSceptre;
+    private final JLabel resultValue = new JLabel("+0", SwingConstants.CENTER);
+
+    private int syncedMagicLevel = 99;
 
     @Inject
-    NyloFreezerPanel()
+    NyloFreezerPanel(ItemManager itemManager)
     {
         super();
 
         setBorder(new EmptyBorder(10, 10, 10, 10));
         setBackground(ColorScheme.DARK_GRAY_COLOR);
-        setLayout(new GridBagLayout());
-
-        GridBagConstraints c = new GridBagConstraints();
-        c.gridx = 0;
-        c.gridy = 0;
-        c.weightx = 1;
-        c.fill = GridBagConstraints.HORIZONTAL;
-        c.anchor = GridBagConstraints.NORTH;
-
-        add(createHeader(), c);
-        c.gridy++;
-        c.insets = new Insets(8, 0, 0, 0);
-        add(createSettingsPanel(), c);
-        c.gridy++;
-        c.insets = new Insets(8, 0, 0, 0);
-        add(createResultPanel(), c);
-
-        tableModel = new DefaultTableModel(new Object[]{"Drain", "Eff.", "Atk"}, 0)
-        {
-            @Override
-            public boolean isCellEditable(int row, int column)
-            {
-                return false;
-            }
-        };
-        decayTable = createTable(tableModel);
-
-        c.gridy++;
-        c.insets = new Insets(8, 0, 0, 0);
-        add(createDecayPanel(), c);
-        c.gridy++;
-        c.insets = new Insets(8, 0, 0, 0);
-        add(createActionRow(), c);
-
-        c.gridy++;
-        c.weighty = 1;
-        c.fill = GridBagConstraints.BOTH;
-        add(Box.createGlue(), c);
-
-        configureInputs();
-        attachListeners();
-        resetSelections();
-    }
-
-    private JPanel createHeader()
-    {
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.setOpaque(false);
+        setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
 
         JLabel title = new JLabel("Nylo Freezer");
         title.setForeground(Color.WHITE);
-        title.setFont(SMALL_FONT.deriveFont(Font.BOLD, 15f));
+        title.setFont(NORMAL_FONT.deriveFont(Font.BOLD));
+        title.setAlignmentX(Component.LEFT_ALIGNMENT);
+        add(title);
+        add(Box.createVerticalStrut(10));
 
-        JLabel subtitle = new JLabel("Maiden");
-        subtitle.setForeground(TOB_RED_BRIGHT);
-        subtitle.setFont(SMALL_BOLD);
+        FlatTextField magicInput = new FlatTextField();
+        magicInput.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+        magicInput.setHoverBackgroundColor(ColorScheme.DARK_GRAY_HOVER_COLOR);
+        magicInput.setBorder(new EmptyBorder(5, 7, 5, 7));
+        magicInput.setAlignmentX(Component.LEFT_ALIGNMENT);
+        magicLevelField = magicInput.getTextField();
+        magicLevelField.setText("99");
+        magicLevelField.setFont(SMALL_FONT);
+        magicLevelField.setForeground(Color.WHITE);
+        magicLevelField.setHorizontalAlignment(JTextField.LEFT);
+        magicLevelField.setToolTipText("Automatically synced to your base Magic level. You can edit it for theorycrafting.");
 
-        panel.add(title, BorderLayout.WEST);
-        panel.add(subtitle, BorderLayout.EAST);
-        return panel;
-    }
+        add(createLabeledField("Magic Level", magicInput));
+        add(Box.createVerticalStrut(7));
 
-    private JPanel createSettingsPanel()
-    {
-        JPanel panel = sectionPanel();
-        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        configureCombo(boostCombo);
+        configureCombo(prayerCombo);
+        add(createLabeledField("Boost", boostCombo));
+        add(Box.createVerticalStrut(7));
+        add(createLabeledField("Prayer", prayerCombo));
+        add(Box.createVerticalStrut(11));
 
-        panel.add(createInputRow("Magic level", magicLevelSpinner));
-        panel.add(Box.createVerticalStrut(5));
-        panel.add(createInputRow("Boost", boostCombo));
-        panel.add(Box.createVerticalStrut(5));
-        panel.add(createInputRow("Prayer", prayerCombo));
-        panel.add(Box.createVerticalStrut(7));
+        JLabel equipmentLabel = new JLabel("Equipment");
+        equipmentLabel.setFont(SMALL_FONT);
+        equipmentLabel.setForeground(Color.WHITE);
+        equipmentLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        add(equipmentLabel);
+        add(Box.createVerticalStrut(4));
 
-        JPanel equipment = new JPanel(new GridLayout(1, 2, 4, 0));
+        voidMage = new ItemToggle("Void mage", "Void mage helm", this::recalculate);
+        iceSceptre = new ItemToggle("Ice sceptre", "Ice ancient sceptre", this::recalculate);
+
+        AsyncBufferedImage voidImage = itemManager.getImage(VOID_MAGE_HELM_ID);
+        voidImage.addTo(voidMage);
+        AsyncBufferedImage sceptreImage = itemManager.getImage(ICE_ANCIENT_SCEPTRE_ID);
+        sceptreImage.addTo(iceSceptre);
+
+        JPanel equipment = new JPanel(new GridLayout(1, 2, 7, 0));
         equipment.setOpaque(false);
-        equipment.setMaximumSize(new Dimension(Integer.MAX_VALUE, 23));
+        equipment.setAlignmentX(Component.LEFT_ALIGNMENT);
+        equipment.setMaximumSize(new Dimension(Integer.MAX_VALUE, 44));
         equipment.add(voidMage);
         equipment.add(iceSceptre);
-        panel.add(equipment);
+        add(equipment);
+        add(Box.createVerticalStrut(11));
 
-        return panel;
+        JPanel resultPanel = new JPanel(new BorderLayout());
+        resultPanel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+        resultPanel.setBorder(new EmptyBorder(7, 8, 7, 8));
+        resultPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        resultPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 48));
+
+        JLabel resultLabel = new JLabel("Required Magic attack");
+        resultLabel.setFont(SMALL_FONT);
+        resultLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+
+        resultValue.setFont(NORMAL_FONT.deriveFont(Font.BOLD, 18f));
+        resultValue.setForeground(Color.WHITE);
+
+        resultPanel.add(resultLabel, BorderLayout.WEST);
+        resultPanel.add(resultValue, BorderLayout.EAST);
+        add(resultPanel);
+        add(Box.createVerticalStrut(8));
+
+        JButton reset = new JButton("Reset");
+        reset.setFont(SMALL_FONT);
+        reset.setForeground(Color.WHITE);
+        reset.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+        reset.setFocusPainted(false);
+        reset.setAlignmentX(Component.LEFT_ALIGNMENT);
+        reset.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        reset.addActionListener(e -> resetSelections());
+        add(reset);
+
+        add(Box.createVerticalGlue());
+
+        magicLevelField.addActionListener(e -> commitMagicLevel());
+        magicLevelField.addFocusListener(new FocusAdapter()
+        {
+            @Override
+            public void focusLost(FocusEvent e)
+            {
+                commitMagicLevel();
+            }
+        });
+        boostCombo.addActionListener(e -> recalculate());
+        prayerCombo.addActionListener(e -> recalculate());
+
+        resetSelections();
     }
 
-    private JPanel createInputRow(String labelText, Component input)
+    private static JPanel createLabeledField(String labelText, Component input)
     {
-        JPanel row = new JPanel(new BorderLayout(8, 0));
-        row.setOpaque(false);
-        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 25));
+        JPanel container = new JPanel(new BorderLayout());
+        container.setOpaque(false);
+        container.setAlignmentX(Component.LEFT_ALIGNMENT);
+        container.setMaximumSize(new Dimension(Integer.MAX_VALUE, 49));
 
         JLabel label = new JLabel(labelText);
         label.setFont(SMALL_FONT);
-        label.setForeground(TEXT);
-
-        row.add(label, BorderLayout.WEST);
-        row.add(input, BorderLayout.EAST);
-        return row;
-    }
-
-    private JPanel createResultPanel()
-    {
-        JPanel panel = new JPanel(new BorderLayout(8, 0));
-        panel.setBackground(TOB_RED_DARK);
-        panel.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(TOB_RED, 1),
-            new EmptyBorder(6, 8, 6, 8)));
-
-        JLabel label = new JLabel("Required attack  ·  0 drain");
-        label.setFont(SMALL_BOLD);
         label.setForeground(Color.WHITE);
+        label.setBorder(new EmptyBorder(0, 0, 4, 0));
 
-        resultValue.setFont(RESULT_FONT);
-        resultValue.setForeground(TOB_RED_BRIGHT);
-
-        panel.add(label, BorderLayout.WEST);
-        panel.add(resultValue, BorderLayout.EAST);
-        return panel;
+        container.add(label, BorderLayout.NORTH);
+        container.add(input, BorderLayout.CENTER);
+        return container;
     }
 
-    private JPanel createDecayPanel()
+    private static void configureCombo(JComboBox<?> combo)
     {
-        JPanel panel = new JPanel();
-        panel.setOpaque(false);
-        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-
-        JLabel label = new JLabel("Boost decay / stat drain");
-        label.setFont(SMALL_BOLD);
-        label.setForeground(TEXT);
-        label.setAlignmentX(Component.LEFT_ALIGNMENT);
-
-        JPanel tableHolder = new JPanel(new BorderLayout());
-        tableHolder.setAlignmentX(Component.LEFT_ALIGNMENT);
-        tableHolder.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-        tableHolder.setBorder(BorderFactory.createLineBorder(ColorScheme.DARKER_GRAY_COLOR));
-        tableHolder.add(decayTable.getTableHeader(), BorderLayout.NORTH);
-        tableHolder.add(decayTable, BorderLayout.CENTER);
-
-        panel.add(label);
-        panel.add(Box.createVerticalStrut(4));
-        panel.add(tableHolder);
-        return panel;
-    }
-
-    private JPanel createActionRow()
-    {
-        JPanel row = new JPanel(new GridLayout(1, 2, 5, 0));
-        row.setOpaque(false);
-        row.setPreferredSize(new Dimension(0, 26));
-
-        JButton reset = compactButton("Reset");
-        reset.addActionListener(e -> resetSelections());
-
-        JButton copy = compactButton("Copy");
-        copy.addActionListener(e -> copyTable());
-
-        row.add(reset);
-        row.add(copy);
-        return row;
-    }
-
-    private void configureInputs()
-    {
-        magicLevelSpinner.setFont(SMALL_FONT);
-        magicLevelSpinner.setPreferredSize(new Dimension(58, 24));
-        magicLevelSpinner.setToolTipText("Automatically synced from your logged-in character; you can still edit it manually.");
-        if (magicLevelSpinner.getEditor() instanceof JSpinner.DefaultEditor)
-        {
-            JSpinner.DefaultEditor editor = (JSpinner.DefaultEditor) magicLevelSpinner.getEditor();
-            editor.getTextField().setFont(SMALL_FONT);
-            editor.getTextField().setHorizontalAlignment(SwingConstants.CENTER);
-        }
-
-        boostCombo.setFont(SMALL_FONT);
-        boostCombo.setPreferredSize(new Dimension(126, 24));
-        boostCombo.setFocusable(false);
-
-        prayerCombo.setFont(SMALL_FONT);
-        prayerCombo.setPreferredSize(new Dimension(126, 24));
-        prayerCombo.setFocusable(false);
-
-        configureCheckbox(voidMage, "Apply Void mage's 1.45x Magic multiplier");
-        configureCheckbox(iceSceptre, "Apply Ice sceptre's 1.10x freeze modifier");
-    }
-
-    private static void configureCheckbox(JCheckBox box, String tooltip)
-    {
-        box.setOpaque(false);
-        box.setForeground(TEXT);
-        box.setFont(SMALL_FONT);
-        box.setFocusPainted(false);
-        box.setMargin(new Insets(0, 0, 0, 0));
-        box.setToolTipText(tooltip);
-    }
-
-    private void attachListeners()
-    {
-        magicLevelSpinner.addChangeListener(e -> recalculate());
-        boostCombo.addActionListener(e -> recalculate());
-        prayerCombo.addActionListener(e -> recalculate());
-        voidMage.addActionListener(e -> recalculate());
-        iceSceptre.addActionListener(e -> recalculate());
+        combo.setFont(SMALL_FONT);
+        combo.setForeground(Color.WHITE);
+        combo.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+        combo.setFocusable(false);
+        combo.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
     }
 
     void setMagicLevelFromClient(int level)
     {
-        int clamped = Math.max(1, Math.min(99, level));
-        if ((int) magicLevelSpinner.getValue() != clamped)
+        syncedMagicLevel = clampMagic(level);
+        magicLevelField.setText(Integer.toString(syncedMagicLevel));
+        recalculate();
+    }
+
+    private void commitMagicLevel()
+    {
+        int level;
+        try
         {
-            magicLevelSpinner.setValue(clamped);
+            level = Integer.parseInt(magicLevelField.getText().trim());
+        }
+        catch (NumberFormatException ex)
+        {
+            level = syncedMagicLevel;
+        }
+
+        level = clampMagic(level);
+        magicLevelField.setText(Integer.toString(level));
+        recalculate();
+    }
+
+    private static int clampMagic(int level)
+    {
+        return Math.max(1, Math.min(99, level));
+    }
+
+    private int getMagicLevel()
+    {
+        try
+        {
+            return clampMagic(Integer.parseInt(magicLevelField.getText().trim()));
+        }
+        catch (NumberFormatException ex)
+        {
+            return syncedMagicLevel;
         }
     }
 
     private void resetSelections()
     {
-        voidMage.setSelected(false);
-        iceSceptre.setSelected(false);
+        magicLevelField.setText(Integer.toString(syncedMagicLevel));
         boostCombo.setSelectedItem(FreezeCalculator.Boost.NONE);
         prayerCombo.setSelectedItem(FreezeCalculator.Prayer.NONE);
+        voidMage.setSelected(false);
+        iceSceptre.setSelected(false);
         recalculate();
     }
 
     private void recalculate()
     {
-        if (tableModel == null)
-        {
-            return;
-        }
-
-        int magicLevel = (int) magicLevelSpinner.getValue();
         FreezeCalculator.Boost boost = (FreezeCalculator.Boost) boostCombo.getSelectedItem();
         FreezeCalculator.Prayer prayer = (FreezeCalculator.Prayer) prayerCombo.getSelectedItem();
 
@@ -303,142 +250,76 @@ final class NyloFreezerPanel extends PluginPanel
             prayer = FreezeCalculator.Prayer.NONE;
         }
 
-        FreezeCalculator.Result baseline = FreezeCalculator.calculate(
-            magicLevel,
+        int requiredAttack = FreezeCalculator.calculateRequiredAttack(
+            getMagicLevel(),
             boost,
             prayer,
             voidMage.isSelected(),
-            iceSceptre.isSelected(),
-            0);
+            iceSceptre.isSelected());
 
-        resultValue.setText(formatAttack(baseline.getRequiredAttack()));
+        resultValue.setText(requiredAttack >= 0 ? "+" + requiredAttack : Integer.toString(requiredAttack));
+    }
 
-        tableModel.setRowCount(0);
-        for (int drain = 1; drain <= 10; drain++)
+    /**
+     * Independent toggle using the same visual rules as RuneLite's MaterialTab:
+     * darker gray cell, darker-gray hover, and a 1px BRAND_ORANGE underline when selected.
+     */
+    private static final class ItemToggle extends JLabel
+    {
+        private static final Border SELECTED_BORDER = new CompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 1, 0, ColorScheme.BRAND_ORANGE),
+            BorderFactory.createEmptyBorder(5, 10, 4, 10));
+        private static final Border UNSELECTED_BORDER =
+            BorderFactory.createEmptyBorder(5, 10, 5, 10);
+
+        private boolean selected;
+        private final Runnable onChange;
+
+        ItemToggle(String accessibleName, String tooltip, Runnable onChange)
         {
-            FreezeCalculator.Result result = FreezeCalculator.calculate(
-                magicLevel,
-                boost,
-                prayer,
-                voidMage.isSelected(),
-                iceSceptre.isSelected(),
-                drain);
+            this.onChange = onChange;
+            setName(accessibleName);
+            setToolTipText(tooltip);
+            setOpaque(true);
+            setHorizontalAlignment(SwingConstants.CENTER);
+            setVerticalAlignment(SwingConstants.CENTER);
+            setBackground(ColorScheme.DARKER_GRAY_COLOR);
+            setBorder(UNSELECTED_BORDER);
+            setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
-            tableModel.addRow(new Object[]{
-                result.getDrain(),
-                result.getEffectiveMagic(),
-                formatAttack(result.getRequiredAttack())
+            addMouseListener(new MouseAdapter()
+            {
+                @Override
+                public void mousePressed(MouseEvent e)
+                {
+                    setSelected(!selected);
+                    ItemToggle.this.onChange.run();
+                }
+
+                @Override
+                public void mouseEntered(MouseEvent e)
+                {
+                    setBackground(ColorScheme.DARKER_GRAY_HOVER_COLOR);
+                }
+
+                @Override
+                public void mouseExited(MouseEvent e)
+                {
+                    setBackground(ColorScheme.DARKER_GRAY_COLOR);
+                }
             });
         }
-    }
 
-    private void copyTable()
-    {
-        int magicLevel = (int) magicLevelSpinner.getValue();
-        FreezeCalculator.Boost boost = (FreezeCalculator.Boost) boostCombo.getSelectedItem();
-        FreezeCalculator.Prayer prayer = (FreezeCalculator.Prayer) prayerCombo.getSelectedItem();
-
-        if (boost == null)
+        boolean isSelected()
         {
-            boost = FreezeCalculator.Boost.NONE;
-        }
-        if (prayer == null)
-        {
-            prayer = FreezeCalculator.Prayer.NONE;
+            return selected;
         }
 
-        List<String> lines = new ArrayList<>();
-        lines.add("Nylo Freezer — Magic " + magicLevel);
-        lines.add(boost.getLabel() + " · " + prayer.getLabel()
-            + " · Void " + (voidMage.isSelected() ? "On" : "Off")
-            + " · Ice Sceptre " + (iceSceptre.isSelected() ? "On" : "Off"));
-
-        for (int drain = 0; drain <= 10; drain++)
+        void setSelected(boolean selected)
         {
-            FreezeCalculator.Result result = FreezeCalculator.calculate(
-                magicLevel,
-                boost,
-                prayer,
-                voidMage.isSelected(),
-                iceSceptre.isSelected(),
-                drain);
-
-            lines.add("Drain " + drain + ": " + formatAttack(result.getRequiredAttack())
-                + " Magic attack (effective Magic " + result.getEffectiveMagic() + ")");
+            this.selected = selected;
+            setBorder(selected ? SELECTED_BORDER : UNSELECTED_BORDER);
+            repaint();
         }
-
-        Toolkit.getDefaultToolkit().getSystemClipboard().setContents(
-            new StringSelection(String.join(System.lineSeparator(), lines)), null);
-    }
-
-    private static JTable createTable(DefaultTableModel model)
-    {
-        JTable table = new JTable(model);
-        table.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-        table.setForeground(TEXT);
-        table.setSelectionBackground(ColorScheme.DARK_GRAY_COLOR);
-        table.setSelectionForeground(TEXT);
-        table.setGridColor(ColorScheme.DARK_GRAY_COLOR);
-        table.setFont(SMALL_FONT);
-        table.setRowHeight(21);
-        table.setShowVerticalLines(false);
-        table.setShowHorizontalLines(true);
-        table.setFocusable(false);
-        table.setRowSelectionAllowed(false);
-        table.setIntercellSpacing(new Dimension(0, 0));
-
-        JTableHeader header = table.getTableHeader();
-        header.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        header.setForeground(MUTED);
-        header.setFont(SMALL_BOLD);
-        header.setPreferredSize(new Dimension(0, 22));
-        header.setReorderingAllowed(false);
-
-        DefaultTableCellRenderer normal = new DefaultTableCellRenderer();
-        normal.setHorizontalAlignment(SwingConstants.CENTER);
-        normal.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-        normal.setForeground(TEXT);
-        normal.setFont(SMALL_FONT);
-        normal.setBorder(new EmptyBorder(0, 2, 0, 2));
-
-        DefaultTableCellRenderer attack = new DefaultTableCellRenderer();
-        attack.setHorizontalAlignment(SwingConstants.CENTER);
-        attack.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-        attack.setForeground(TOB_RED_BRIGHT);
-        attack.setFont(SMALL_BOLD);
-        attack.setBorder(new EmptyBorder(0, 2, 0, 2));
-
-        table.getColumnModel().getColumn(0).setCellRenderer(normal);
-        table.getColumnModel().getColumn(1).setCellRenderer(normal);
-        table.getColumnModel().getColumn(2).setCellRenderer(attack);
-        table.getColumnModel().getColumn(0).setPreferredWidth(52);
-        table.getColumnModel().getColumn(1).setPreferredWidth(62);
-        table.getColumnModel().getColumn(2).setPreferredWidth(62);
-
-        return table;
-    }
-
-    private static JPanel sectionPanel()
-    {
-        JPanel panel = new JPanel();
-        panel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-        panel.setBorder(new EmptyBorder(7, 7, 7, 7));
-        return panel;
-    }
-
-    private static JButton compactButton(String text)
-    {
-        JButton button = new JButton(text);
-        button.setFont(SMALL_FONT);
-        button.setForeground(TEXT);
-        button.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-        button.setFocusPainted(false);
-        button.setMargin(new Insets(2, 4, 2, 4));
-        return button;
-    }
-
-    private static String formatAttack(int value)
-    {
-        return value > 0 ? "+" + value : Integer.toString(value);
     }
 }

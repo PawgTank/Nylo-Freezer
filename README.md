@@ -4,7 +4,6 @@ A native RuneLite sidebar calculator for the minimum Magic attack bonus needed t
 
 ## Features
 
-- Native RuneLite sidebar panel (Swing / `PluginPanel`)
 - Void Mage and Ice Sceptre toggles
 - Saturated Heart, Imbued Heart, Forgotten Brew, Ancient Brew, Magic Potion, and no-boost options
 - Augury, Mystic Vigour, Mystic Might, and no-prayer options
