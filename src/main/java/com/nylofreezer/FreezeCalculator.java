@@ -29,6 +29,12 @@ final class FreezeCalculator
         {
             return formula;
         }
+
+        @Override
+        public String toString()
+        {
+            return label;
+        }
     }
 
     enum Prayer
@@ -57,6 +63,12 @@ final class FreezeCalculator
         String getFormula()
         {
             return formula;
+        }
+
+        @Override
+        public String toString()
+        {
+            return label;
         }
 
         double getMultiplier()

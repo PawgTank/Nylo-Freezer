@@ -6,6 +6,13 @@ import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
+import javax.swing.SwingUtilities;
+import net.runelite.api.Client;
+import net.runelite.api.GameState;
+import net.runelite.api.Skill;
+import net.runelite.api.events.GameStateChanged;
+import net.runelite.api.events.StatChanged;
+import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
@@ -19,16 +26,19 @@ import net.runelite.client.ui.NavigationButton;
 public class NyloFreezerPlugin extends Plugin
 {
     @Inject
+    private Client client;
+
+    @Inject
     private ClientToolbar clientToolbar;
 
+    @Inject
     private NyloFreezerPanel panel;
+
     private NavigationButton navButton;
 
     @Override
     protected void startUp()
     {
-        panel = new NyloFreezerPanel();
-
         navButton = NavigationButton.builder()
             .tooltip("Nylo Freezer")
             .icon(createSidebarIcon())
@@ -37,6 +47,7 @@ public class NyloFreezerPlugin extends Plugin
             .build();
 
         clientToolbar.addNavigation(navButton);
+        syncMagicLevelFromClient();
     }
 
     @Override
@@ -48,7 +59,41 @@ public class NyloFreezerPlugin extends Plugin
         }
 
         navButton = null;
-        panel = null;
+    }
+
+    @Subscribe
+    public void onGameStateChanged(GameStateChanged event)
+    {
+        if (event.getGameState() == GameState.LOGGED_IN)
+        {
+            syncMagicLevelFromClient();
+        }
+    }
+
+    @Subscribe
+    public void onStatChanged(StatChanged event)
+    {
+        if (event.getSkill() != Skill.MAGIC)
+        {
+            return;
+        }
+
+        setPanelMagicLevel(event.getLevel());
+    }
+
+    private void syncMagicLevelFromClient()
+    {
+        if (client.getGameState() != GameState.LOGGED_IN)
+        {
+            return;
+        }
+
+        setPanelMagicLevel(client.getRealSkillLevel(Skill.MAGIC));
+    }
+
+    private void setPanelMagicLevel(int level)
+    {
+        SwingUtilities.invokeLater(() -> panel.setMagicLevelFromClient(level));
     }
 
     private static BufferedImage createSidebarIcon()
@@ -61,7 +106,7 @@ public class NyloFreezerPlugin extends Plugin
         {
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             g.setStroke(new BasicStroke(2.1f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-            g.setColor(new Color(204, 62, 82));
+            g.setColor(new Color(202, 63, 74));
 
             int cx = size / 2;
             int cy = size / 2;
@@ -75,7 +120,7 @@ public class NyloFreezerPlugin extends Plugin
                 g.drawLine(cx - dx, cy - dy, cx + dx, cy + dy);
             }
 
-            g.setColor(new Color(236, 211, 178));
+            g.setColor(new Color(235, 112, 122));
             g.fillOval(cx - 2, cy - 2, 4, 4);
         }
         finally
