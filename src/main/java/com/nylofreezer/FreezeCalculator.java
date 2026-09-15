@@ -30,6 +30,8 @@ final class FreezeCalculator
         AUGURY("Augury", 1.25),
         MYSTIC_VIGOUR("Mystic Vigour", 1.18),
         MYSTIC_MIGHT("Mystic Might", 1.15),
+        MYSTIC_LORE("Mystic Lore", 1.10),
+        MYSTIC_WILL("Mystic Will", 1.05),
         NONE("No Prayer", 1.00);
 
         private final String label;
@@ -96,16 +98,7 @@ final class FreezeCalculator
                 break;
         }
 
-        int effective = (int) Math.floor(visual);
-        effective = (int) Math.floor(effective * prayer.getMultiplier());
-
-        if (useVoid)
-        {
-            effective = (int) Math.floor(effective * 1.45);
-        }
-
-        // Original calculator adds 9 after prayer and Void.
-        effective += 9;
+        int effective = calculateEffectiveLevel((int) Math.floor(visual), prayer, useVoid);
 
         if (iceSceptre)
         {
@@ -113,5 +106,57 @@ final class FreezeCalculator
         }
 
         return (int) Math.ceil((toBeat / (double) effective) - 64);
+    }
+
+    private static int calculateEffectiveLevel(int visibleLevel, Prayer prayer, boolean useVoid)
+    {
+        int effective = (int) Math.floor(visibleLevel * prayer.getMultiplier());
+
+        if (useVoid)
+        {
+            effective = (int) Math.floor(effective * 1.45);
+        }
+
+        // Original calculator adds 9 after prayer and Void.
+        return effective + 9;
+    }
+
+    static int calculateLiveRequiredAttack(
+        int baseLevel, int visibleLevel, Prayer prayer, boolean useVoid, boolean iceSceptre)
+    {
+        double targetRoll = (baseLevel + 9) * 204.0;
+        double effective = calculateEffectiveLevel(visibleLevel, prayer, useVoid);
+        return (int) Math.ceil(targetRoll / (iceSceptre ? 1.1 : 1.0) / effective - 64);
+    }
+
+    /**
+     * Maiden ice-spell accuracy interpolates between the unboosted rolls at +0 and +140.
+     * https://oldschool.runescape.wiki/w/User:Mc/Mechanics/ToB
+     * Keep the base level fixed when evaluating boosts and drains.
+     */
+    static double calculateFreezeChance(
+        int baseLevel, int visibleLevel, int magicAttack, Prayer prayer, boolean useVoid, boolean iceSceptre)
+    {
+        double roll = calculateEffectiveLevel(visibleLevel, prayer, useVoid) * (magicAttack + 64.0);
+        if (iceSceptre)
+        {
+            roll *= 1.1;
+        }
+        double minimumRoll = (baseLevel + 9) * 64.0;
+        double rollRange = (baseLevel + 9) * 140.0;
+        return Math.max(0, Math.min(1, (roll - minimumRoll) / rollRange));
+    }
+
+    /** Number of levels that can be lost while still meeting the 100% accuracy threshold. */
+    static int calculateLevelsToSpare(
+        int baseLevel, int visibleLevel, int magicAttack, Prayer prayer, boolean useVoid, boolean iceSceptre)
+    {
+        int minimumLevel = visibleLevel;
+        while (minimumLevel > 0 && magicAttack >= calculateLiveRequiredAttack(
+            baseLevel, minimumLevel - 1, prayer, useVoid, iceSceptre))
+        {
+            minimumLevel--;
+        }
+        return visibleLevel - minimumLevel;
     }
 }

@@ -1,18 +1,23 @@
 package com.nylofreezer;
 
 import com.google.inject.Inject;
+import com.google.inject.Provides;
 import java.awt.image.BufferedImage;
 import javax.swing.SwingUtilities;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
-import net.runelite.api.InventoryID;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.Skill;
 import net.runelite.api.events.GameStateChanged;
+import net.runelite.api.events.GameTick;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.StatChanged;
+import net.runelite.api.gameval.InventoryID;
+import net.runelite.client.callback.ClientThread;
+import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.game.ItemEquipmentStats;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.game.ItemStats;
@@ -20,6 +25,7 @@ import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
+import net.runelite.client.ui.overlay.OverlayManager;
 import net.runelite.client.util.ImageUtil;
 
 @PluginDescriptor(
@@ -41,11 +47,34 @@ public class NyloFreezerPlugin extends Plugin
     @Inject
     private NyloFreezerPanel panel;
 
+    @Inject
+    private ClientThread clientThread;
+
+    @Inject
+    private OverlayManager overlayManager;
+
+    @Inject
+    private LiveFreezeOverlay liveOverlay;
+
+    @Inject
+    private NyloFreezerConfig config;
+
     private NavigationButton navButton;
+    private Integer currentMagicAttack;
+    private boolean useVoid;
+    private boolean iceSceptre;
+    private volatile boolean running;
+
+    @Provides
+    NyloFreezerConfig provideConfig(ConfigManager configManager)
+    {
+        return configManager.getConfig(NyloFreezerConfig.class);
+    }
 
     @Override
     protected void startUp()
     {
+        running = true;
         navButton = NavigationButton.builder()
             .tooltip("Nylo Freezer")
             .icon(createSidebarIcon())
@@ -54,12 +83,23 @@ public class NyloFreezerPlugin extends Plugin
             .build();
 
         clientToolbar.addNavigation(navButton);
-        syncPlayerStateFromClient();
+        overlayManager.add(liveOverlay);
+        clientThread.invoke(() ->
+        {
+            if (running)
+            {
+                syncPlayerStateFromClient();
+            }
+        });
     }
 
     @Override
     protected void shutDown()
     {
+        running = false;
+        overlayManager.remove(liveOverlay);
+        liveOverlay.clear();
+        currentMagicAttack = null;
         if (navButton != null)
         {
             clientToolbar.removeNavigation(navButton);
@@ -75,8 +115,10 @@ public class NyloFreezerPlugin extends Plugin
         {
             syncPlayerStateFromClient();
         }
-        else if (event.getGameState() == GameState.LOGIN_SCREEN)
+        else
         {
+            currentMagicAttack = null;
+            liveOverlay.clear();
             setPanelCurrentMagicAttackBonus(null);
         }
     }
@@ -88,16 +130,71 @@ public class NyloFreezerPlugin extends Plugin
         {
             // getLevel() is the real/static level. The panel clamps anything below 82 to 82.
             setPanelMagicLevel(event.getLevel());
+            updateLiveOverlay();
         }
     }
 
     @Subscribe
     public void onItemContainerChanged(ItemContainerChanged event)
     {
-        if (event.getContainerId() == InventoryID.EQUIPMENT.getId())
+        if (event.getContainerId() == InventoryID.WORN)
         {
             syncCurrentMagicAttackBonus();
+            updateLiveOverlay();
         }
+    }
+
+    @Subscribe
+    public void onGameTick(GameTick event)
+    {
+        // Read active prayers and boosted Magic once per tick, never in the per-frame renderer.
+        updateLiveOverlay();
+    }
+
+    @Subscribe
+    public void onConfigChanged(ConfigChanged event)
+    {
+        if (NyloFreezerConfig.GROUP.equals(event.getGroup()))
+        {
+            clientThread.invoke(this::updateLiveOverlay);
+        }
+    }
+
+    private void updateLiveOverlay()
+    {
+        if (!running || !config.liveFreezeOverlay() || client.getGameState() != GameState.LOGGED_IN
+            || currentMagicAttack == null)
+        {
+            liveOverlay.clear();
+            return;
+        }
+        liveOverlay.update(client.getRealSkillLevel(Skill.MAGIC), client.getBoostedSkillLevel(Skill.MAGIC),
+            currentMagicAttack, currentPrayer(), useVoid, iceSceptre);
+    }
+
+    private FreezeCalculator.Prayer currentPrayer()
+    {
+        if (client.isPrayerActive(net.runelite.api.Prayer.AUGURY))
+        {
+            return FreezeCalculator.Prayer.AUGURY;
+        }
+        if (client.isPrayerActive(net.runelite.api.Prayer.MYSTIC_VIGOUR))
+        {
+            return FreezeCalculator.Prayer.MYSTIC_VIGOUR;
+        }
+        if (client.isPrayerActive(net.runelite.api.Prayer.MYSTIC_MIGHT))
+        {
+            return FreezeCalculator.Prayer.MYSTIC_MIGHT;
+        }
+        if (client.isPrayerActive(net.runelite.api.Prayer.MYSTIC_LORE))
+        {
+            return FreezeCalculator.Prayer.MYSTIC_LORE;
+        }
+        if (client.isPrayerActive(net.runelite.api.Prayer.MYSTIC_WILL))
+        {
+            return FreezeCalculator.Prayer.MYSTIC_WILL;
+        }
+        return FreezeCalculator.Prayer.NONE;
     }
 
     private void syncPlayerStateFromClient()
@@ -106,14 +203,16 @@ public class NyloFreezerPlugin extends Plugin
         {
             setPanelMagicLevel(client.getRealSkillLevel(Skill.MAGIC));
             syncCurrentMagicAttackBonus();
+            updateLiveOverlay();
         }
     }
 
     private void syncCurrentMagicAttackBonus()
     {
-        ItemContainer equipment = client.getItemContainer(InventoryID.EQUIPMENT);
+        ItemContainer equipment = client.getItemContainer(InventoryID.WORN);
         if (equipment == null)
         {
+            currentMagicAttack = null;
             setPanelCurrentMagicAttackBonus(null);
             return;
         }
@@ -139,6 +238,9 @@ public class NyloFreezerPlugin extends Plugin
             }
         }
 
+        currentMagicAttack = magicAttack;
+        useVoid = FreezerEquipment.hasVoidMage(equipment);
+        iceSceptre = FreezerEquipment.hasIceSceptre(equipment);
         setPanelCurrentMagicAttackBonus(magicAttack);
     }
 
