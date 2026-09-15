@@ -13,11 +13,12 @@ import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.util.EnumMap;
+import java.util.Map;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
-import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
@@ -25,32 +26,50 @@ import javax.swing.SwingConstants;
 import javax.swing.border.Border;
 import javax.swing.border.CompoundBorder;
 import javax.swing.border.EmptyBorder;
+import javax.swing.plaf.basic.BasicButtonUI;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.PluginPanel;
 import net.runelite.client.ui.components.FlatTextField;
 import net.runelite.client.util.AsyncBufferedImage;
+import net.runelite.client.util.SwingUtil;
 
 @Singleton
 class NyloFreezerPanel extends PluginPanel
 {
+    private static final int MIN_MAGIC_LEVEL = 82;
+    private static final int MAX_MAGIC_LEVEL = 99;
+
     private static final int VOID_MAGE_HELM_ID = 11663;
     private static final int ICE_ANCIENT_SCEPTRE_ID = 28262;
+
+    private static final int SATURATED_HEART_ID = 27641;
+    private static final int IMBUED_HEART_ID = 20724;
+    private static final int FORGOTTEN_BREW_4_ID = 27629;
+    private static final int ANCIENT_BREW_4_ID = 26340;
+    private static final int MAGIC_POTION_4_ID = 3040;
 
     private static final Font SMALL_FONT = FontManager.getRunescapeSmallFont();
     private static final Font NORMAL_FONT = FontManager.getRunescapeFont();
 
     private final JTextField magicLevelField;
-    private final JComboBox<FreezeCalculator.Boost> boostCombo =
-        new JComboBox<>(FreezeCalculator.Boost.values());
-    private final JComboBox<FreezeCalculator.Prayer> prayerCombo =
-        new JComboBox<>(FreezeCalculator.Prayer.values());
-    private final ItemToggle voidMage;
-    private final ItemToggle iceSceptre;
-    private final JLabel resultValue = new JLabel("+0", SwingConstants.CENTER);
+    private final EquipmentToggle voidMage;
+    private final EquipmentToggle iceSceptre;
 
-    private int syncedMagicLevel = 99;
+    private final Map<FreezeCalculator.Boost, ChoiceTile> boostTiles =
+        new EnumMap<>(FreezeCalculator.Boost.class);
+    private final Map<FreezeCalculator.Prayer, ChoiceTile> prayerTiles =
+        new EnumMap<>(FreezeCalculator.Prayer.class);
+
+    private final JLabel targetValue = new JLabel("+0", SwingConstants.RIGHT);
+    private final JLabel currentValue = new JLabel("—", SwingConstants.RIGHT);
+    private final JLabel additionalValue = new JLabel("—", SwingConstants.RIGHT);
+
+    private FreezeCalculator.Boost selectedBoost = FreezeCalculator.Boost.NONE;
+    private FreezeCalculator.Prayer selectedPrayer = FreezeCalculator.Prayer.NONE;
+    private Integer currentMagicAttackBonus;
+    private int syncedMagicLevel = MAX_MAGIC_LEVEL;
 
     @Inject
     NyloFreezerPanel(ItemManager itemManager)
@@ -69,77 +88,113 @@ class NyloFreezerPanel extends PluginPanel
         add(Box.createVerticalStrut(10));
 
         FlatTextField magicInput = new FlatTextField();
+        magicInput.setPreferredSize(new Dimension(PluginPanel.PANEL_WIDTH - 20, 30));
+        magicInput.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
         magicInput.setBackground(ColorScheme.DARKER_GRAY_COLOR);
         magicInput.setHoverBackgroundColor(ColorScheme.DARK_GRAY_HOVER_COLOR);
-        magicInput.setBorder(new EmptyBorder(5, 7, 5, 7));
         magicInput.setAlignmentX(Component.LEFT_ALIGNMENT);
+
         magicLevelField = magicInput.getTextField();
-        magicLevelField.setText("99");
-        magicLevelField.setFont(SMALL_FONT);
+        magicLevelField.setText(Integer.toString(MAX_MAGIC_LEVEL));
+        magicLevelField.setFont(NORMAL_FONT);
         magicLevelField.setForeground(Color.WHITE);
+        magicLevelField.setCaretColor(Color.WHITE);
+        magicLevelField.setSelectionColor(ColorScheme.BRAND_ORANGE);
+        magicLevelField.setSelectedTextColor(Color.WHITE);
         magicLevelField.setHorizontalAlignment(JTextField.LEFT);
-        magicLevelField.setToolTipText("Automatically synced to your base Magic level. You can edit it for theorycrafting.");
+        magicLevelField.setToolTipText(
+            "Automatically synced to your base Magic level. Minimum used by the calculator is 82.");
 
-        add(createLabeledField("Magic Level", magicInput));
-        add(Box.createVerticalStrut(7));
+        add(createLabeledField("Magic Level", magicInput, 51));
+        add(Box.createVerticalStrut(9));
 
-        configureCombo(boostCombo);
-        configureCombo(prayerCombo);
-        add(createLabeledField("Boost", boostCombo));
-        add(Box.createVerticalStrut(7));
-        add(createLabeledField("Prayer", prayerCombo));
-        add(Box.createVerticalStrut(11));
-
-        JLabel equipmentLabel = new JLabel("Equipment");
-        equipmentLabel.setFont(SMALL_FONT);
-        equipmentLabel.setForeground(Color.WHITE);
-        equipmentLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        add(equipmentLabel);
+        add(createSectionLabel("Equipment"));
         add(Box.createVerticalStrut(4));
 
-        voidMage = new ItemToggle("Void mage", "Void mage helm", this::recalculate);
-        iceSceptre = new ItemToggle("Ice sceptre", "Ice ancient sceptre", this::recalculate);
+        voidMage = new EquipmentToggle("Void Mage Set", this::recalculate);
+        iceSceptre = new EquipmentToggle("Ice Ancient Sceptre", this::recalculate);
+        itemManager.getImage(VOID_MAGE_HELM_ID).addTo(voidMage);
+        itemManager.getImage(ICE_ANCIENT_SCEPTRE_ID).addTo(iceSceptre);
 
-        AsyncBufferedImage voidImage = itemManager.getImage(VOID_MAGE_HELM_ID);
-        voidImage.addTo(voidMage);
-        AsyncBufferedImage sceptreImage = itemManager.getImage(ICE_ANCIENT_SCEPTRE_ID);
-        sceptreImage.addTo(iceSceptre);
+        JPanel equipmentPanel = createTileGrid(1, 2, 7, 0, 44);
+        equipmentPanel.add(voidMage);
+        equipmentPanel.add(iceSceptre);
+        add(equipmentPanel);
+        add(Box.createVerticalStrut(9));
 
-        JPanel equipment = new JPanel(new GridLayout(1, 2, 7, 0));
-        equipment.setOpaque(false);
-        equipment.setAlignmentX(Component.LEFT_ALIGNMENT);
-        equipment.setMaximumSize(new Dimension(Integer.MAX_VALUE, 44));
-        equipment.add(voidMage);
-        equipment.add(iceSceptre);
-        add(equipment);
-        add(Box.createVerticalStrut(11));
+        add(createSectionLabel("Boost"));
+        add(Box.createVerticalStrut(4));
 
-        JPanel resultPanel = new JPanel(new BorderLayout());
+        JPanel boostPanel = createTileGrid(2, 3, 5, 5, 85);
+        addBoostTile(itemManager, boostPanel, FreezeCalculator.Boost.SATURATED_HEART,
+            "Saturated Heart", SATURATED_HEART_ID, null);
+        addBoostTile(itemManager, boostPanel, FreezeCalculator.Boost.IMBUED_HEART,
+            "Imbued Heart", IMBUED_HEART_ID, null);
+        addBoostTile(itemManager, boostPanel, FreezeCalculator.Boost.FORGOTTEN_BREW,
+            "Forgotten Brew", FORGOTTEN_BREW_4_ID, null);
+        addBoostTile(itemManager, boostPanel, FreezeCalculator.Boost.ANCIENT_BREW,
+            "Ancient Brew", ANCIENT_BREW_4_ID, null);
+        addBoostTile(itemManager, boostPanel, FreezeCalculator.Boost.MAGIC_POTION,
+            "Magic Potion", MAGIC_POTION_4_ID, null);
+        addBoostTile(itemManager, boostPanel, FreezeCalculator.Boost.NONE,
+            "No Boost", -1, "None");
+        add(boostPanel);
+        add(Box.createVerticalStrut(9));
+
+        add(createSectionLabel("Prayer"));
+        add(Box.createVerticalStrut(4));
+
+        JPanel prayerPanel = createTileGrid(1, 4, 4, 0, 38);
+        addPrayerTile(prayerPanel, FreezeCalculator.Prayer.AUGURY, "Augury", "Aug");
+        addPrayerTile(prayerPanel, FreezeCalculator.Prayer.MYSTIC_VIGOUR, "Mystic Vigour", "Vig");
+        addPrayerTile(prayerPanel, FreezeCalculator.Prayer.MYSTIC_MIGHT, "Mystic Might", "Might");
+        addPrayerTile(prayerPanel, FreezeCalculator.Prayer.NONE, "No Prayer", "None");
+        add(prayerPanel);
+        add(Box.createVerticalStrut(10));
+
+        JPanel resultPanel = new JPanel();
+        resultPanel.setLayout(new BoxLayout(resultPanel, BoxLayout.Y_AXIS));
         resultPanel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-        resultPanel.setBorder(new EmptyBorder(7, 8, 7, 8));
+        resultPanel.setBorder(new EmptyBorder(6, 8, 6, 8));
         resultPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        resultPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 48));
+        resultPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 69));
 
-        JLabel resultLabel = new JLabel("Required Magic attack");
-        resultLabel.setFont(SMALL_FONT);
-        resultLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+        configureResultValue(targetValue);
+        configureResultValue(currentValue);
+        configureResultValue(additionalValue);
 
-        resultValue.setFont(NORMAL_FONT.deriveFont(Font.BOLD, 18f));
-        resultValue.setForeground(Color.WHITE);
+        resultPanel.add(createResultRow("Target Magic attack bonus", targetValue));
+        resultPanel.add(createResultRow("Current Magic attack bonus", currentValue));
+        resultPanel.add(createResultRow("Additional required bonus", additionalValue));
 
-        resultPanel.add(resultLabel, BorderLayout.WEST);
-        resultPanel.add(resultValue, BorderLayout.EAST);
         add(resultPanel);
         add(Box.createVerticalStrut(8));
 
         JButton reset = new JButton("Reset");
+        SwingUtil.removeButtonDecorations(reset);
+        reset.setUI(new BasicButtonUI());
         reset.setFont(SMALL_FONT);
         reset.setForeground(Color.WHITE);
         reset.setBackground(ColorScheme.DARKER_GRAY_COLOR);
         reset.setFocusPainted(false);
         reset.setAlignmentX(Component.LEFT_ALIGNMENT);
-        reset.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        reset.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+        reset.setPreferredSize(new Dimension(PluginPanel.PANEL_WIDTH - 20, 30));
         reset.addActionListener(e -> resetSelections());
+        reset.addMouseListener(new MouseAdapter()
+        {
+            @Override
+            public void mouseEntered(MouseEvent e)
+            {
+                reset.setBackground(ColorScheme.DARK_GRAY_HOVER_COLOR);
+            }
+
+            @Override
+            public void mouseExited(MouseEvent e)
+            {
+                reset.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+            }
+        });
         add(reset);
 
         add(Box.createVerticalGlue());
@@ -153,22 +208,18 @@ class NyloFreezerPanel extends PluginPanel
                 commitMagicLevel();
             }
         });
-        boostCombo.addActionListener(e -> recalculate());
-        prayerCombo.addActionListener(e -> recalculate());
 
         resetSelections();
     }
 
-    private static JPanel createLabeledField(String labelText, Component input)
+    private static JPanel createLabeledField(String labelText, Component input, int height)
     {
         JPanel container = new JPanel(new BorderLayout());
         container.setOpaque(false);
         container.setAlignmentX(Component.LEFT_ALIGNMENT);
-        container.setMaximumSize(new Dimension(Integer.MAX_VALUE, 49));
+        container.setMaximumSize(new Dimension(Integer.MAX_VALUE, height));
 
-        JLabel label = new JLabel(labelText);
-        label.setFont(SMALL_FONT);
-        label.setForeground(Color.WHITE);
+        JLabel label = createSectionLabel(labelText);
         label.setBorder(new EmptyBorder(0, 0, 4, 0));
 
         container.add(label, BorderLayout.NORTH);
@@ -176,19 +227,114 @@ class NyloFreezerPanel extends PluginPanel
         return container;
     }
 
-    private static void configureCombo(JComboBox<?> combo)
+    private static JLabel createSectionLabel(String text)
     {
-        combo.setFont(SMALL_FONT);
-        combo.setForeground(Color.WHITE);
-        combo.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-        combo.setFocusable(false);
-        combo.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+        JLabel label = new JLabel(text);
+        label.setFont(SMALL_FONT);
+        label.setForeground(Color.WHITE);
+        label.setAlignmentX(Component.LEFT_ALIGNMENT);
+        return label;
+    }
+
+    private static JLabel createResultLabel(String text)
+    {
+        JLabel label = new JLabel(text);
+        label.setFont(SMALL_FONT);
+        label.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+        return label;
+    }
+
+    private static void configureResultValue(JLabel value)
+    {
+        value.setFont(SMALL_FONT.deriveFont(Font.BOLD));
+        value.setForeground(Color.WHITE);
+    }
+
+    private static JPanel createResultRow(String text, JLabel value)
+    {
+        JPanel row = new JPanel(new BorderLayout(6, 0));
+        row.setOpaque(false);
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 19));
+        row.add(createResultLabel(text), BorderLayout.CENTER);
+        row.add(value, BorderLayout.EAST);
+        return row;
+    }
+
+    private static JPanel createTileGrid(int rows, int columns, int horizontalGap, int verticalGap, int height)
+    {
+        JPanel panel = new JPanel(new GridLayout(rows, columns, horizontalGap, verticalGap));
+        panel.setOpaque(false);
+        panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, height));
+        return panel;
+    }
+
+    private void addBoostTile(
+        ItemManager itemManager,
+        JPanel panel,
+        FreezeCalculator.Boost boost,
+        String tooltip,
+        int itemId,
+        String text)
+    {
+        ChoiceTile tile = new ChoiceTile(tooltip, () -> selectBoost(boost));
+        tile.setName(tooltip);
+        if (text != null)
+        {
+            tile.setText(text);
+        }
+        if (itemId > 0)
+        {
+            AsyncBufferedImage image = itemManager.getImage(itemId);
+            image.addTo(tile);
+        }
+        boostTiles.put(boost, tile);
+        panel.add(tile);
+    }
+
+    private void addPrayerTile(
+        JPanel panel,
+        FreezeCalculator.Prayer prayer,
+        String tooltip,
+        String text)
+    {
+        ChoiceTile tile = new ChoiceTile(tooltip, () -> selectPrayer(prayer));
+        tile.setName(tooltip);
+        tile.setText(text);
+        prayerTiles.put(prayer, tile);
+        panel.add(tile);
+    }
+
+    private void selectBoost(FreezeCalculator.Boost boost)
+    {
+        selectedBoost = boost;
+        for (Map.Entry<FreezeCalculator.Boost, ChoiceTile> entry : boostTiles.entrySet())
+        {
+            entry.getValue().setSelected(entry.getKey() == boost);
+        }
+        recalculate();
+    }
+
+    private void selectPrayer(FreezeCalculator.Prayer prayer)
+    {
+        selectedPrayer = prayer;
+        for (Map.Entry<FreezeCalculator.Prayer, ChoiceTile> entry : prayerTiles.entrySet())
+        {
+            entry.getValue().setSelected(entry.getKey() == prayer);
+        }
+        recalculate();
     }
 
     void setMagicLevelFromClient(int level)
     {
         syncedMagicLevel = clampMagic(level);
         magicLevelField.setText(Integer.toString(syncedMagicLevel));
+        recalculate();
+    }
+
+    void setCurrentMagicAttackBonus(Integer bonus)
+    {
+        currentMagicAttackBonus = bonus;
         recalculate();
     }
 
@@ -211,7 +357,7 @@ class NyloFreezerPanel extends PluginPanel
 
     private static int clampMagic(int level)
     {
-        return Math.max(1, Math.min(99, level));
+        return Math.max(MIN_MAGIC_LEVEL, Math.min(MAX_MAGIC_LEVEL, level));
     }
 
     private int getMagicLevel()
@@ -229,8 +375,8 @@ class NyloFreezerPanel extends PluginPanel
     private void resetSelections()
     {
         magicLevelField.setText(Integer.toString(syncedMagicLevel));
-        boostCombo.setSelectedItem(FreezeCalculator.Boost.NONE);
-        prayerCombo.setSelectedItem(FreezeCalculator.Prayer.NONE);
+        selectBoost(FreezeCalculator.Boost.NONE);
+        selectPrayer(FreezeCalculator.Prayer.NONE);
         voidMage.setSelected(false);
         iceSceptre.setSelected(false);
         recalculate();
@@ -238,54 +384,59 @@ class NyloFreezerPanel extends PluginPanel
 
     private void recalculate()
     {
-        FreezeCalculator.Boost boost = (FreezeCalculator.Boost) boostCombo.getSelectedItem();
-        FreezeCalculator.Prayer prayer = (FreezeCalculator.Prayer) prayerCombo.getSelectedItem();
-
-        if (boost == null)
-        {
-            boost = FreezeCalculator.Boost.NONE;
-        }
-        if (prayer == null)
-        {
-            prayer = FreezeCalculator.Prayer.NONE;
-        }
-
-        int requiredAttack = FreezeCalculator.calculateRequiredAttack(
+        int targetAttack = FreezeCalculator.calculateRequiredAttack(
             getMagicLevel(),
-            boost,
-            prayer,
+            selectedBoost,
+            selectedPrayer,
             voidMage.isSelected(),
             iceSceptre.isSelected());
 
-        resultValue.setText(requiredAttack >= 0 ? "+" + requiredAttack : Integer.toString(requiredAttack));
+        targetValue.setText(formatBonus(targetAttack));
+
+        if (currentMagicAttackBonus == null)
+        {
+            currentValue.setText("—");
+            additionalValue.setText("—");
+            additionalValue.setToolTipText("Log in to compare against your equipped Magic attack bonus.");
+            return;
+        }
+
+        currentValue.setText(formatBonus(currentMagicAttackBonus));
+        int additionalRequired = Math.max(0, targetAttack - currentMagicAttackBonus);
+        additionalValue.setText(formatBonus(additionalRequired));
+
+        if (additionalRequired == 0)
+        {
+            int overTarget = currentMagicAttackBonus - targetAttack;
+            additionalValue.setToolTipText(overTarget > 0
+                ? "Target met. Current equipment is " + overTarget + " above the target."
+                : "Target met exactly.");
+        }
+        else
+        {
+            additionalValue.setToolTipText(
+                "You need " + additionalRequired + " more Magic attack bonus to reach the target.");
+        }
+    }
+
+    private static String formatBonus(int bonus)
+    {
+        return bonus >= 0 ? "+" + bonus : Integer.toString(bonus);
     }
 
     /**
-     * Independent toggle using the same visual rules as RuneLite's MaterialTab:
-     * darker gray cell, darker-gray hover, and a 1px BRAND_ORANGE underline when selected.
+     * Independent equipment toggle using the same basic visual language as RuneLite's
+     * MaterialTab: darker-gray cell, hover background, and an orange underline when selected.
      */
-    private static final class ItemToggle extends JLabel
+    private static final class EquipmentToggle extends JLabel
     {
-        private static final Border SELECTED_BORDER = new CompoundBorder(
-            BorderFactory.createMatteBorder(0, 0, 1, 0, ColorScheme.BRAND_ORANGE),
-            BorderFactory.createEmptyBorder(5, 10, 4, 10));
-        private static final Border UNSELECTED_BORDER =
-            BorderFactory.createEmptyBorder(5, 10, 5, 10);
-
         private boolean selected;
         private final Runnable onChange;
 
-        ItemToggle(String accessibleName, String tooltip, Runnable onChange)
+        EquipmentToggle(String tooltip, Runnable onChange)
         {
             this.onChange = onChange;
-            setName(accessibleName);
-            setToolTipText(tooltip);
-            setOpaque(true);
-            setHorizontalAlignment(SwingConstants.CENTER);
-            setVerticalAlignment(SwingConstants.CENTER);
-            setBackground(ColorScheme.DARKER_GRAY_COLOR);
-            setBorder(UNSELECTED_BORDER);
-            setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            configureTile(this, tooltip);
 
             addMouseListener(new MouseAdapter()
             {
@@ -293,7 +444,7 @@ class NyloFreezerPanel extends PluginPanel
                 public void mousePressed(MouseEvent e)
                 {
                     setSelected(!selected);
-                    ItemToggle.this.onChange.run();
+                    EquipmentToggle.this.onChange.run();
                 }
 
                 @Override
@@ -318,8 +469,73 @@ class NyloFreezerPanel extends PluginPanel
         void setSelected(boolean selected)
         {
             this.selected = selected;
-            setBorder(selected ? SELECTED_BORDER : UNSELECTED_BORDER);
+            setBorder(selected ? TileBorders.SELECTED : TileBorders.UNSELECTED);
             repaint();
+        }
+    }
+
+    /** Mutually-exclusive selection tile used by boost and prayer groups. */
+    private static final class ChoiceTile extends JLabel
+    {
+        private final Runnable onSelect;
+
+        ChoiceTile(String tooltip, Runnable onSelect)
+        {
+            this.onSelect = onSelect;
+            configureTile(this, tooltip);
+            setFont(SMALL_FONT);
+            setForeground(Color.WHITE);
+
+            addMouseListener(new MouseAdapter()
+            {
+                @Override
+                public void mousePressed(MouseEvent e)
+                {
+                    ChoiceTile.this.onSelect.run();
+                }
+
+                @Override
+                public void mouseEntered(MouseEvent e)
+                {
+                    setBackground(ColorScheme.DARKER_GRAY_HOVER_COLOR);
+                }
+
+                @Override
+                public void mouseExited(MouseEvent e)
+                {
+                    setBackground(ColorScheme.DARKER_GRAY_COLOR);
+                }
+            });
+        }
+
+        void setSelected(boolean selected)
+        {
+            setBorder(selected ? TileBorders.SELECTED : TileBorders.UNSELECTED);
+            repaint();
+        }
+    }
+
+    private static void configureTile(JLabel tile, String tooltip)
+    {
+        tile.setToolTipText(tooltip);
+        tile.setOpaque(true);
+        tile.setHorizontalAlignment(SwingConstants.CENTER);
+        tile.setVerticalAlignment(SwingConstants.CENTER);
+        tile.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+        tile.setBorder(TileBorders.UNSELECTED);
+        tile.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+    }
+
+    private static final class TileBorders
+    {
+        private static final Border SELECTED = new CompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 1, 0, ColorScheme.BRAND_ORANGE),
+            BorderFactory.createEmptyBorder(4, 4, 3, 4));
+        private static final Border UNSELECTED =
+            BorderFactory.createEmptyBorder(4, 4, 4, 4);
+
+        private TileBorders()
+        {
         }
     }
 }
