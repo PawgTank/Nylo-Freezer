@@ -9,30 +9,40 @@ import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.GridLayout;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.Polygon;
+import java.awt.RenderingHints;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.EnumMap;
 import java.util.Map;
+import java.awt.image.BufferedImage;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.ImageIcon;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
 import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
 import javax.swing.border.Border;
 import javax.swing.border.CompoundBorder;
 import javax.swing.border.EmptyBorder;
 import javax.swing.plaf.basic.BasicButtonUI;
+import net.runelite.api.gameval.SpriteID;
 import net.runelite.client.game.ItemManager;
+import net.runelite.client.game.SpriteManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.PluginPanel;
 import net.runelite.client.ui.components.FlatTextField;
 import net.runelite.client.util.AsyncBufferedImage;
+import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.SwingUtil;
 
 @Singleton
@@ -72,9 +82,11 @@ class NyloFreezerPanel extends PluginPanel
     private int syncedMagicLevel = MAX_MAGIC_LEVEL;
 
     @Inject
-    NyloFreezerPanel(ItemManager itemManager)
+    NyloFreezerPanel(ItemManager itemManager, SpriteManager spriteManager)
     {
-        super();
+        // This panel is compact enough that it does not need PluginPanel's default JScrollPane.
+        // Using the unwrapped form also avoids the scroll pane outline around the whole sidebar.
+        super(false);
 
         setBorder(new EmptyBorder(10, 10, 10, 10));
         setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -87,14 +99,11 @@ class NyloFreezerPanel extends PluginPanel
         add(title);
         add(Box.createVerticalStrut(10));
 
-        FlatTextField magicInput = new FlatTextField();
-        magicInput.setPreferredSize(new Dimension(PluginPanel.PANEL_WIDTH - 20, 30));
-        magicInput.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
-        magicInput.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-        magicInput.setHoverBackgroundColor(ColorScheme.DARK_GRAY_HOVER_COLOR);
-        magicInput.setAlignmentX(Component.LEFT_ALIGNMENT);
+        FlatTextField magicTextInput = new FlatTextField();
+        magicTextInput.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+        magicTextInput.setHoverBackgroundColor(ColorScheme.DARK_GRAY_HOVER_COLOR);
 
-        magicLevelField = magicInput.getTextField();
+        magicLevelField = magicTextInput.getTextField();
         magicLevelField.setText(Integer.toString(MAX_MAGIC_LEVEL));
         magicLevelField.setFont(NORMAL_FONT);
         magicLevelField.setForeground(Color.WHITE);
@@ -103,7 +112,26 @@ class NyloFreezerPanel extends PluginPanel
         magicLevelField.setSelectedTextColor(Color.WHITE);
         magicLevelField.setHorizontalAlignment(JTextField.LEFT);
         magicLevelField.setToolTipText(
-            "Automatically synced to your base Magic level. Minimum used by the calculator is 82.");
+            "Automatically synced to your base Magic level. Minimum for ice barrage is 82.");
+
+        JPanel magicInput = new JPanel(new BorderLayout());
+        magicInput.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+        magicInput.setPreferredSize(new Dimension(PluginPanel.PANEL_WIDTH - 20, 30));
+        magicInput.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+        magicInput.setAlignmentX(Component.LEFT_ALIGNMENT);
+        magicInput.add(magicTextInput, BorderLayout.CENTER);
+
+        JPanel arrows = new JPanel(new GridLayout(2, 1, 0, 0));
+        arrows.setOpaque(false);
+        arrows.setPreferredSize(new Dimension(24, 30));
+        ArrowButton up = new ArrowButton(true, () -> adjustMagicLevel(1));
+        ArrowButton down = new ArrowButton(false, () -> adjustMagicLevel(-1));
+        up.setToolTipText("Increase Magic level");
+        down.setToolTipText("Decrease Magic level");
+        arrows.add(up);
+        arrows.add(down);
+        magicInput.add(arrows, BorderLayout.EAST);
+        magicInput.addMouseWheelListener(e -> adjustMagicLevel(e.getWheelRotation() < 0 ? 1 : -1));
 
         add(createLabeledField("Magic Level", magicInput, 51));
         add(Box.createVerticalStrut(9));
@@ -145,10 +173,14 @@ class NyloFreezerPanel extends PluginPanel
         add(Box.createVerticalStrut(4));
 
         JPanel prayerPanel = createTileGrid(1, 4, 4, 0, 38);
-        addPrayerTile(prayerPanel, FreezeCalculator.Prayer.AUGURY, "Augury", "Aug");
-        addPrayerTile(prayerPanel, FreezeCalculator.Prayer.MYSTIC_VIGOUR, "Mystic Vigour", "Vig");
-        addPrayerTile(prayerPanel, FreezeCalculator.Prayer.MYSTIC_MIGHT, "Mystic Might", "Might");
-        addPrayerTile(prayerPanel, FreezeCalculator.Prayer.NONE, "No Prayer", "None");
+        addPrayerTile(spriteManager, prayerPanel, FreezeCalculator.Prayer.AUGURY,
+            "Augury", SpriteID.Prayeron.AUGURY);
+        addPrayerTile(spriteManager, prayerPanel, FreezeCalculator.Prayer.MYSTIC_VIGOUR,
+            "Mystic Vigour", SpriteID.Prayeron.MYSTIC_VIGOUR);
+        addPrayerTile(spriteManager, prayerPanel, FreezeCalculator.Prayer.MYSTIC_MIGHT,
+            "Mystic Might", SpriteID.Prayeron.MYSTIC_MIGHT);
+        addPrayerTile(spriteManager, prayerPanel, FreezeCalculator.Prayer.NONE,
+            "No Prayer", -1);
         add(prayerPanel);
         add(Box.createVerticalStrut(10));
 
@@ -293,14 +325,40 @@ class NyloFreezerPanel extends PluginPanel
     }
 
     private void addPrayerTile(
+        SpriteManager spriteManager,
         JPanel panel,
         FreezeCalculator.Prayer prayer,
         String tooltip,
-        String text)
+        int spriteId)
     {
         ChoiceTile tile = new ChoiceTile(tooltip, () -> selectPrayer(prayer));
         tile.setName(tooltip);
-        tile.setText(text);
+
+        if (spriteId > 0)
+        {
+            spriteManager.getSpriteAsync(spriteId, 0, sprite ->
+            {
+                if (sprite == null)
+                {
+                    return;
+                }
+
+                SwingUtilities.invokeLater(() ->
+                {
+                    // Keep all three prayer icons visually consistent with RuneLite's own
+                    // compact sprite presentation.
+                    BufferedImage icon = ImageUtil.resizeImage(
+                        ImageUtil.resizeCanvas(sprite, 30, 30), 26, 26);
+                    tile.setIcon(new ImageIcon(icon));
+                    tile.setText(null);
+                });
+            });
+        }
+        else
+        {
+            tile.setText("None");
+        }
+
         prayerTiles.put(prayer, tile);
         panel.add(tile);
     }
@@ -335,6 +393,13 @@ class NyloFreezerPanel extends PluginPanel
     void setCurrentMagicAttackBonus(Integer bonus)
     {
         currentMagicAttackBonus = bonus;
+        recalculate();
+    }
+
+    private void adjustMagicLevel(int delta)
+    {
+        int level = clampMagic(getMagicLevel() + delta);
+        magicLevelField.setText(Integer.toString(level));
         recalculate();
     }
 
@@ -422,6 +487,66 @@ class NyloFreezerPanel extends PluginPanel
     private static String formatBonus(int bonus)
     {
         return bonus >= 0 ? "+" + bonus : Integer.toString(bonus);
+    }
+
+    /** Compact RuneLite-styled up/down control for the Magic level field. */
+    private static final class ArrowButton extends JButton
+    {
+        private final boolean up;
+        private boolean hovered;
+
+        ArrowButton(boolean up, Runnable onClick)
+        {
+            this.up = up;
+            setUI(new BasicButtonUI());
+            SwingUtil.removeButtonDecorations(this);
+            setOpaque(true);
+            setBackground(ColorScheme.DARKER_GRAY_COLOR);
+            setBorder(BorderFactory.createMatteBorder(0, 1, up ? 1 : 0, 0, ColorScheme.DARK_GRAY_COLOR));
+            setFocusable(false);
+            setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            addActionListener(e -> onClick.run());
+            addMouseListener(new MouseAdapter()
+            {
+                @Override
+                public void mouseEntered(MouseEvent e)
+                {
+                    hovered = true;
+                    repaint();
+                }
+
+                @Override
+                public void mouseExited(MouseEvent e)
+                {
+                    hovered = false;
+                    repaint();
+                }
+            });
+        }
+
+        @Override
+        protected void paintComponent(Graphics graphics)
+        {
+            Graphics2D g = (Graphics2D) graphics.create();
+            try
+            {
+                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g.setColor(hovered ? ColorScheme.DARK_GRAY_HOVER_COLOR : ColorScheme.DARKER_GRAY_COLOR);
+                g.fillRect(0, 0, getWidth(), getHeight());
+
+                int cx = getWidth() / 2;
+                int cy = getHeight() / 2;
+                Polygon triangle = up
+                    ? new Polygon(new int[]{cx - 3, cx + 3, cx}, new int[]{cy + 2, cy + 2, cy - 2}, 3)
+                    : new Polygon(new int[]{cx - 3, cx + 3, cx}, new int[]{cy - 2, cy - 2, cy + 2}, 3);
+                g.setColor(ColorScheme.LIGHT_GRAY_COLOR);
+                g.fillPolygon(triangle);
+            }
+            finally
+            {
+                g.dispose();
+            }
+        }
     }
 
     /**
