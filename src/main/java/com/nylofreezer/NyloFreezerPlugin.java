@@ -147,6 +147,14 @@ public class NyloFreezerPlugin extends Plugin
     @Subscribe
     public void onGameTick(GameTick event)
     {
+        // Equipment may not be available when LOGGED_IN fires. Retry until it is loaded,
+        // without requiring the player to change gear after login or a world hop.
+        if (running && currentMagicAttack == null && client.getGameState() == GameState.LOGGED_IN)
+        {
+            syncPlayerStateFromClient();
+            return;
+        }
+
         // Read active prayers and boosted Magic once per tick, never in the per-frame renderer.
         updateLiveOverlay();
     }

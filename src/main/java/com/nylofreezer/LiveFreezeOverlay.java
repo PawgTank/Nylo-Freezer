@@ -8,8 +8,8 @@ import java.awt.Graphics2D;
 import java.util.Locale;
 import net.runelite.client.ui.overlay.OverlayPanel;
 import net.runelite.client.ui.overlay.OverlayPosition;
+import net.runelite.client.ui.overlay.components.ComponentConstants;
 import net.runelite.client.ui.overlay.components.LineComponent;
-import net.runelite.client.ui.overlay.components.TitleComponent;
 
 @Singleton
 class LiveFreezeOverlay extends OverlayPanel
@@ -25,7 +25,7 @@ class LiveFreezeOverlay extends OverlayPanel
         super(plugin);
         this.config = config;
         setPosition(OverlayPosition.TOP_LEFT);
-        panelComponent.setPreferredSize(new Dimension(230, 0));
+        setResizable(false);
     }
 
     void update(int baseLevel, int visibleLevel, int magicAttack,
@@ -35,7 +35,7 @@ class LiveFreezeOverlay extends OverlayPanel
             baseLevel, visibleLevel, magicAttack, prayer, useVoid, iceSceptre);
         if (config.showFreezeChance())
         {
-            label = "Freeze chance";
+            label = "% to Freeze";
             value = formatChance(chance);
             color = chanceColor(chance);
             return;
@@ -45,13 +45,13 @@ class LiveFreezeOverlay extends OverlayPanel
             baseLevel, visibleLevel, prayer, useVoid, iceSceptre) - magicAttack);
         if (additional > 0)
         {
-            label = "Additional required bonus";
+            label = "bonus needed";
             value = "+" + additional;
             color = chanceColor(chance);
         }
         else
         {
-            label = "Magic levels to spare";
+            label = "Overlevel";
             value = Integer.toString(FreezeCalculator.calculateLevelsToSpare(
                 baseLevel, visibleLevel, magicAttack, prayer, useVoid, iceSceptre));
             color = Color.GREEN;
@@ -82,7 +82,11 @@ class LiveFreezeOverlay extends OverlayPanel
             return null;
         }
 
-        panelComponent.getChildren().add(TitleComponent.builder().text("Nylo Freezer").build());
+        // Fit a three-digit bonus using the current overlay font and the panel's padding.
+        int width = graphics.getFontMetrics().stringWidth("bonus needed +999")
+            + 2 * ComponentConstants.STANDARD_BORDER;
+        setPreferredSize(new Dimension(width, 0));
+
         panelComponent.getChildren().add(LineComponent.builder()
             .left(label)
             .right(value)
